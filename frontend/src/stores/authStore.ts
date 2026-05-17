@@ -7,8 +7,8 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
 
-  login: (phone: string, password: string) => Promise<void>;
-  register: (phone: string, password: string) => Promise<void>;
+  login: (phone: string, pin: string) => Promise<void>;
+  register: (phone: string, pin: string) => Promise<void>;
   logout: () => void;
   fetchUser: () => Promise<void>;
   initialize: () => Promise<void>;
@@ -19,19 +19,18 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: !!localStorage.getItem('access_token'),
   isLoading: true,
 
-  login: async (phone, password) => {
-    const res = await api.post<AuthTokens>('/api/auth/login', { phone, password });
+  login: async (phone, pin) => {
+    const res = await api.post<AuthTokens>('/api/auth/login', { phone, pin });
     localStorage.setItem('access_token', res.data.access_token);
     localStorage.setItem('refresh_token', res.data.refresh_token);
     set({ isAuthenticated: true });
 
-    // Fetch user profile
     const userRes = await api.get<User>('/api/auth/me');
     set({ user: userRes.data });
   },
 
-  register: async (phone, password) => {
-    const res = await api.post<AuthTokens>('/api/auth/register', { phone, password });
+  register: async (phone, pin) => {
+    const res = await api.post<AuthTokens>('/api/auth/register', { phone, pin });
     localStorage.setItem('access_token', res.data.access_token);
     localStorage.setItem('refresh_token', res.data.refresh_token);
     set({ isAuthenticated: true });

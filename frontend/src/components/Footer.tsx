@@ -7,7 +7,7 @@ export default function Footer() {
           <span className="text-primary-400 font-semibold">P.o.Riot</span>
         </p>
         <p className="text-xs text-gray-600 mt-1">
-          JustBet &copy; {new Date().getFullYear()} — Gamble Responsibly
+          JustBet Kenya &copy; {new Date().getFullYear()} — Gamble Responsibly | 18+
         </p>
       </div>
     </footer>

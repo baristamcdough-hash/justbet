@@ -1,228 +1,178 @@
-# JustBet Sportsbook — Implementation Tasks
+# JustBet Sportsbook — Implementation Tasks (v2 Kenya Localized)
 
-> **Version:** 1.0  
+> **Version:** 2.0  
 > **Date:** 2026-05-17  
+> **Market:** Kenya (KES · M-Pesa · Phone/PIN)  
 > **Credits:** Built by P.o.Riot  
 
 ---
 
 ## Overview
 
-Tasks are organized into sequential MVP blocks. Each block is independently deliverable and builds upon the previous. Tasks within a block can be parallelized where noted.
+Reorganized task blocks for the localized Kenyan sportsbook pivot. All monetary logic uses KES, authentication uses Phone + 4-digit PIN, deposits/withdrawals simulate M-Pesa Daraja STK Push/B2C, and the admin system supports environment-seeded first admin accounts.
 
 ---
 
-## Block 1: Project Scaffolding & Infrastructure
+## Block 1: Infrastructure & Scaffold ✅ COMPLETE
 
-| ID | Task | Priority | Dependencies |
-|----|------|----------|--------------|
-| T-1.1 | Create monorepo directory structure (`/frontend`, `/backend`, `/docs`, `/docker`) | P0 | None |
-| T-1.2 | Initialize backend: Python 3.12, FastAPI, pyproject.toml, virtual env | P0 | T-1.1 |
-| T-1.3 | Initialize frontend: Vite + React 18 + TypeScript + Tailwind CSS | P0 | T-1.1 |
-| T-1.4 | Write `docker-compose.yml` with all 5 services (frontend, api, ws, postgres, redis) | P0 | T-1.1 |
-| T-1.5 | Create Dockerfiles for frontend and backend | P0 | T-1.2, T-1.3 |
-| T-1.6 | Create `.env.example` with all required environment variables | P0 | T-1.4 |
-| T-1.7 | Set up Alembic for database migrations | P0 | T-1.2 |
-
-**Deliverable:** `docker-compose up` boots all services; frontend serves blank page; API returns health check.
+| ID | Task | Status |
+|----|------|--------|
+| T-1.1 | Monorepo structure (frontend/, backend/, docs/) | ✅ Done |
+| T-1.2 | Backend: FastAPI + SQLAlchemy async + Alembic | ✅ Done |
+| T-1.3 | Frontend: Vite + React 18 + TypeScript + Tailwind | ✅ Done |
+| T-1.4 | docker-compose.yml (5 services) | ✅ Done |
+| T-1.5 | Dockerfiles (frontend + backend) | ✅ Done |
+| T-1.6 | .env.example with all variables | ✅ Done |
+| T-1.7 | Alembic configuration | ✅ Done |
 
 ---
 
-## Block 2: Database Models & Migrations
+## Block 2: Database Models ✅ COMPLETE
 
-| ID | Task | Priority | Dependencies |
-|----|------|----------|--------------|
-| T-2.1 | Define SQLAlchemy models: `User`, `Wallet`, `Transaction` | P0 | T-1.7 |
-| T-2.2 | Define SQLAlchemy models: `League`, `Match`, `MatchOdds` | P0 | T-1.7 |
-| T-2.3 | Define SQLAlchemy models: `Ticket`, `Selection` | P0 | T-1.7 |
-| T-2.4 | Create Alembic migration for all tables with indexes and constraints | P0 | T-2.1–T-2.3 |
-| T-2.5 | Add seed data script (demo leagues, matches, admin user) | P1 | T-2.4 |
-
-**Deliverable:** `alembic upgrade head` creates all tables; seed script populates demo data.
+| ID | Task | Status |
+|----|------|--------|
+| T-2.1 | User model (phone, pin_hash, role enum) | ✅ Done |
+| T-2.2 | Wallet model (real_balance, bonus_balance, currency=KES) | ✅ Done |
+| T-2.3 | Transaction model (type enum, checkout_request_id) | ✅ Done |
+| T-2.4 | League, Match, MatchOdds models | ✅ Done |
+| T-2.5 | Ticket, Selection models | ✅ Done |
 
 ---
 
-## Block 3: Authentication & User Management API
+## Block 3: Authentication — Phone/PIN + Admin Seeding 🔄 IN PROGRESS
 
-| ID | Task | Priority | Dependencies |
-|----|------|----------|--------------|
-| T-3.1 | Implement `/api/auth/register` — phone + password, bcrypt hashing, wallet creation | P0 | T-2.1 |
-| T-3.2 | Implement `/api/auth/login` — credential validation, JWT generation (access + refresh) | P0 | T-2.1 |
-| T-3.3 | Implement `/api/auth/refresh` — refresh token rotation | P0 | T-3.2 |
-| T-3.4 | Implement `/api/auth/me` — return current user profile | P1 | T-3.2 |
-| T-3.5 | Create JWT middleware + dependency injection for route protection | P0 | T-3.2 |
-| T-3.6 | Create admin role guard middleware | P0 | T-3.5 |
-| T-3.7 | Implement rate limiting middleware (100/min auth, 30/min anon) | P1 | T-3.5 |
-
-**Deliverable:** Users can register, login, and access protected endpoints with JWT.
+| ID | Task | Priority | Status |
+|----|------|----------|--------|
+| T-3.1 | Update config.py: add FIRST_ADMIN_PHONE, FIRST_ADMIN_PIN, ADMIN_SECRET_TOKEN, MIN_STAKE, currency settings | P0 | 🔄 |
+| T-3.2 | Implement admin auto-seeding on first boot (startup event checks users table) | P0 | 🔄 |
+| T-3.3 | Validate phone format (07XX/+254XX) in registration | P0 | 🔄 |
+| T-3.4 | Validate PIN is exactly 4 digits numeric | P0 | 🔄 |
+| T-3.5 | Update JWT expiry to 30min access / 30d refresh | P0 | 🔄 |
+| T-3.6 | Add ADMIN_SECRET_TOKEN header check for admin user creation | P0 | 🔄 |
 
 ---
 
-## Block 4: Match & Odds Engine (Core)
+## Block 4: Wallet & M-Pesa Simulation 🔄 IN PROGRESS
 
-| ID | Task | Priority | Dependencies |
-|----|------|----------|--------------|
-| T-4.1 | Implement `GET /api/matches` — list active matches grouped by league with current odds | P0 | T-2.2 |
-| T-4.2 | Implement `GET /api/matches/{id}` — single match with odds history | P1 | T-2.2 |
-| T-4.3 | Implement `GET /api/leagues` — list all leagues | P1 | T-2.2 |
-| T-4.4 | Implement `POST /api/admin/matches` — create match with initial odds | P0 | T-3.6, T-2.2 |
-| T-4.5 | Implement `POST /api/admin/leagues` — create league | P0 | T-3.6, T-2.2 |
-| T-4.6 | Implement `PATCH /api/admin/matches/{id}/odds` — update odds + Redis publish | P0 | T-4.4 |
-| T-4.7 | Set up Redis connection pool and pub/sub publisher utility | P0 | T-1.4 |
-| T-4.8 | Implement Redis odds caching (GET/SET with 60s TTL) | P1 | T-4.7 |
-
-**Deliverable:** Admin can create matches/leagues, update odds; public can query match listings. Odds changes published to Redis.
+| ID | Task | Priority | Status |
+|----|------|----------|--------|
+| T-4.1 | Add KES min/max enforcement (deposit: 100–150k, withdraw: 100–70k, stake: 50–500k) | P0 | 🔄 |
+| T-4.2 | Implement simulated STK Push flow (generate checkout_request_id, auto-confirm after 3s) | P0 | 🔄 |
+| T-4.3 | Implement `/api/webhooks/mpesa/callback` with Daraja-style payload format | P0 | 🔄 |
+| T-4.4 | Implement B2C withdrawal simulation | P0 | 🔄 |
+| T-4.5 | Add `checkout_request_id` field to Transaction model | P1 | 🔄 |
+| T-4.6 | Format all amounts as "KES X,XXX.XX" in API responses | P1 | 🔄 |
 
 ---
 
-## Block 5: Real-Time WebSocket Server
+## Block 5: Match Engine & Real-Time Odds ✅ COMPLETE
 
-| ID | Task | Priority | Dependencies |
-|----|------|----------|--------------|
-| T-5.1 | Create WebSocket server entry point (`ws_server.py`) with FastAPI | P0 | T-4.7 |
-| T-5.2 | Implement WS endpoint `/ws/odds` with JWT auth in handshake | P0 | T-3.5, T-5.1 |
-| T-5.3 | Implement subscription message handling (subscribe/unsubscribe to match channels) | P0 | T-5.2 |
-| T-5.4 | Implement Redis subscriber → broadcast to connected WS clients | P0 | T-5.3 |
-| T-5.5 | Add connection health check (ping/pong) and graceful disconnect | P1 | T-5.2 |
-| T-5.6 | Serve cached odds snapshot to new subscribers from Redis | P1 | T-4.8, T-5.3 |
-
-**Deliverable:** Clients receive real-time odds updates within 500ms of admin change. Auto-reconnect supported.
-
----
-
-## Block 6: Bet Slip & Ticket Placement
-
-| ID | Task | Priority | Dependencies |
-|----|------|----------|--------------|
-| T-6.1 | Implement `POST /api/tickets` — validate selections, lock odds, deduct stake, create ticket | P0 | T-3.5, T-2.3 |
-| T-6.2 | Implement wallet balance validation with row-level locking | P0 | T-6.1 |
-| T-6.3 | Implement accumulator odds calculation (multiply selection odds) | P0 | T-6.1 |
-| T-6.4 | Implement `GET /api/tickets` — list user tickets with pagination | P1 | T-6.1 |
-| T-6.5 | Implement `GET /api/tickets/{id}` — full ticket detail with selections | P1 | T-6.1 |
-| T-6.6 | Add odds-change detection: reject bet if odds moved since selection | P1 | T-6.1, T-4.8 |
-
-**Deliverable:** Punters can place single/accumulator bets with atomic wallet deduction and locked odds.
+| ID | Task | Status |
+|----|------|--------|
+| T-5.1 | GET /api/matches (grouped by league) | ✅ Done |
+| T-5.2 | POST /api/admin/matches (create with odds) | ✅ Done |
+| T-5.3 | PATCH /api/admin/matches/{id}/odds (update + Redis publish) | ✅ Done |
+| T-5.4 | Redis pub/sub publisher utility | ✅ Done |
+| T-5.5 | WebSocket /ws/odds endpoint with JWT auth | ✅ Done |
+| T-5.6 | Redis subscriber → broadcast to WS clients | ✅ Done |
+| T-5.7 | Cached odds snapshot for new subscribers | ✅ Done |
 
 ---
 
-## Block 7: Wallet & Payment Gateway
+## Block 6: Bet Slip & Ticket Placement ✅ COMPLETE
 
-| ID | Task | Priority | Dependencies |
-|----|------|----------|--------------|
-| T-7.1 | Implement `GET /api/wallet` — return real + bonus balances | P0 | T-3.5, T-2.1 |
-| T-7.2 | Implement `POST /api/wallet/deposit` — initiate deposit, create pending transaction | P0 | T-7.1 |
-| T-7.3 | Implement `POST /api/webhooks/payment` — simulated M-Pesa callback, confirm deposit | P0 | T-7.2 |
-| T-7.4 | Implement `POST /api/wallet/withdraw` — validate balance, create pending withdrawal | P0 | T-7.1 |
-| T-7.5 | Implement `GET /api/wallet/transactions` — paginated transaction history | P1 | T-7.1 |
-| T-7.6 | Implement balance priority logic (spend bonus before real, configurable) | P1 | T-7.1 |
-
-**Deliverable:** Full wallet lifecycle — deposits (simulated), withdrawals, transaction ledger.
+| ID | Task | Status |
+|----|------|--------|
+| T-6.1 | POST /api/tickets (validate, lock odds, deduct, create) | ✅ Done |
+| T-6.2 | Row-level wallet locking (FOR UPDATE) | ✅ Done |
+| T-6.3 | Accumulator odds multiplication | ✅ Done |
+| T-6.4 | Bonus-first spending priority | ✅ Done |
+| T-6.5 | GET /api/tickets (user's tickets) | ✅ Done |
 
 ---
 
-## Block 8: Admin Dashboard & Match Settlement
+## Block 7: Admin Settlement & Payout Worker ✅ COMPLETE
 
-| ID | Task | Priority | Dependencies |
-|----|------|----------|--------------|
-| T-8.1 | Implement `POST /api/admin/matches/{id}/settle` — input result, evaluate all tickets | P0 | T-6.1, T-4.4 |
-| T-8.2 | Build settlement worker: async payout loop with row-level wallet locking | P0 | T-8.1 |
-| T-8.3 | Implement idempotency guard (prevent duplicate payouts on re-settlement) | P0 | T-8.2 |
-| T-8.4 | Implement retry logic with exponential backoff (3 retries: 2s, 4s, 8s) | P1 | T-8.2 |
-| T-8.5 | Implement `GET /api/admin/liability` — aggregate potential payout per match | P0 | T-6.1 |
-| T-8.6 | Implement `GET /api/admin/dashboard` — stats (active bets, total stakes, users) | P1 | T-6.1 |
-
-**Deliverable:** Admin can settle matches; winning punters auto-credited; liability tracked.
-
----
-
-## Block 9: Frontend — Core Layout & Match Grid
-
-| ID | Task | Priority | Dependencies |
-|----|------|----------|--------------|
-| T-9.1 | Set up React Router, global layout, responsive shell, footer ("Built by P.o.Riot") | P0 | T-1.3 |
-| T-9.2 | Create API service layer (Axios instance with JWT interceptor) | P0 | T-9.1 |
-| T-9.3 | Build MatchGrid component — league-grouped list with virtualized scrolling | P0 | T-9.2 |
-| T-9.4 | Build OddsCell component — 1/X/2 buttons with selection toggle state | P0 | T-9.3 |
-| T-9.5 | Implement odds flash animations (green up-arrow, red down-arrow on change) | P0 | T-9.4 |
-| T-9.6 | Connect WebSocket hook for real-time odds updates | P0 | T-9.5 |
-| T-9.7 | Implement React Query caching for match list (30s stale time) | P1 | T-9.3 |
-
-**Deliverable:** Live match grid with real-time odds updates and visual indicators.
+| ID | Task | Status |
+|----|------|--------|
+| T-7.1 | POST /api/admin/matches/{id}/settle | ✅ Done |
+| T-7.2 | Selection evaluation (won/lost based on result) | ✅ Done |
+| T-7.3 | Background worker (python -m app.worker) | ✅ Done |
+| T-7.4 | Idempotent payout (reference_id guard) | ✅ Done |
+| T-7.5 | Exponential backoff retry (2s, 4s, 8s) | ✅ Done |
+| T-7.6 | GET /api/admin/liability | ✅ Done |
+| T-7.7 | GET /api/admin/dashboard (stats) | ✅ Done |
 
 ---
 
-## Block 10: Frontend — Bet Slip & Placement Flow
+## Block 8: Frontend — Core ✅ COMPLETE
 
-| ID | Task | Priority | Dependencies |
-|----|------|----------|--------------|
-| T-10.1 | Create Zustand bet slip store (add/remove selections, calculate totals) | P0 | T-9.4 |
-| T-10.2 | Build BetSlip drawer component (mobile slide-up) | P0 | T-10.1 |
-| T-10.3 | Build BetSlip sidebar component (desktop sticky) | P0 | T-10.1 |
-| T-10.4 | Implement stake input with live potential winnings calculation | P0 | T-10.2 |
-| T-10.5 | Implement bet placement API call with success/error feedback | P0 | T-10.4 |
-| T-10.6 | Add odds-change warning modal before submission | P1 | T-10.5 |
-| T-10.7 | Persist bet slip to localStorage for session continuity | P1 | T-10.1 |
-
-**Deliverable:** Full bet slip UX — add/remove selections, accumulator math, place bet.
+| ID | Task | Status |
+|----|------|--------|
+| T-8.1 | Router + layout + Footer ("Built by P.o.Riot") | ✅ Done |
+| T-8.2 | API service (Axios + JWT interceptor + refresh) | ✅ Done |
+| T-8.3 | MatchGrid component (league-grouped) | ✅ Done |
+| T-8.4 | OddsCell with flash animations | ✅ Done |
+| T-8.5 | WebSocket hook + real-time updates | ✅ Done |
+| T-8.6 | BetSlip (mobile drawer + desktop sidebar) | ✅ Done |
+| T-8.7 | Zustand store with localStorage persistence | ✅ Done |
 
 ---
 
-## Block 11: Frontend — Auth, Wallet & My Bets
+## Block 9: Frontend — Localization Updates 🔄 IN PROGRESS
 
-| ID | Task | Priority | Dependencies |
-|----|------|----------|--------------|
-| T-11.1 | Build Login page (phone + PIN/password) | P0 | T-9.2 |
-| T-11.2 | Build Register page | P0 | T-9.2 |
-| T-11.3 | Implement auth context with token storage and auto-refresh | P0 | T-11.1 |
-| T-11.4 | Build Wallet page — balance display, deposit form, withdraw form | P0 | T-11.3 |
-| T-11.5 | Build Transaction history list | P1 | T-11.4 |
-| T-11.6 | Build My Bets page — ticket list with status badges | P1 | T-11.3 |
-| T-11.7 | Add protected route wrapper (redirect to login if unauthenticated) | P0 | T-11.3 |
-
-**Deliverable:** Complete auth flow, wallet management, and bet history views.
+| ID | Task | Priority | Status |
+|----|------|----------|--------|
+| T-9.1 | Update all currency displays to "KES X,XXX" format | P0 | 🔄 |
+| T-9.2 | Login page: phone input with +254 prefix, PIN input (4 digits, numeric keyboard) | P0 | 🔄 |
+| T-9.3 | Register page: phone validation (07XX), PIN confirmation | P0 | 🔄 |
+| T-9.4 | Wallet deposit: M-Pesa flow UI ("Enter M-Pesa PIN on phone" status) | P0 | 🔄 |
+| T-9.5 | Wallet withdraw: M-Pesa B2C confirmation UI | P0 | 🔄 |
+| T-9.6 | Min/max validation messages in KES (stake ≥ 50, deposit ≥ 100) | P0 | 🔄 |
+| T-9.7 | Admin: match status toggle (Upcoming → Live → Ended) | P1 | 🔄 |
 
 ---
 
-## Block 12: Frontend — Admin Dashboard
+## Block 10: Deployment & Integration 🔄 IN PROGRESS
 
-| ID | Task | Priority | Dependencies |
-|----|------|----------|--------------|
-| T-12.1 | Build Admin layout with navigation (Dashboard, Matches, Settlement) | P0 | T-11.3 |
-| T-12.2 | Build Match creation form (league, teams, kickoff, initial odds) | P0 | T-12.1 |
-| T-12.3 | Build Odds update panel with live preview | P0 | T-12.2 |
-| T-12.4 | Build Match settlement form (input score → trigger settle API) | P0 | T-12.1 |
-| T-12.5 | Build Liability dashboard — table of matches with potential payouts | P0 | T-12.1 |
-| T-12.6 | Build aggregate stats cards (active bets, total stakes, registered users) | P1 | T-12.1 |
-
-**Deliverable:** Fully functional admin console for match/odds management and settlement.
+| ID | Task | Priority | Status |
+|----|------|----------|--------|
+| T-10.1 | Update render.yaml with FIRST_ADMIN_PHONE, FIRST_ADMIN_PIN, ADMIN_SECRET_TOKEN | P0 | ✅ Done |
+| T-10.2 | Add admin seeding startup hook to main.py | P0 | 🔄 |
+| T-10.3 | Verify docker-compose full boot with localized config | P0 | 🔄 |
+| T-10.4 | Update .env.example with all new env vars | P0 | 🔄 |
+| T-10.5 | Update README.md with Kenya-localized setup instructions | P1 | 🔄 |
+| T-10.6 | Commit and push to PR branch | P0 | 🔄 |
 
 ---
 
-## Block 13: Integration, Polish & Deployment
+## Execution Priority (Current Sprint)
 
-| ID | Task | Priority | Dependencies |
-|----|------|----------|--------------|
-| T-13.1 | End-to-end integration test: register → deposit → place bet → settle → payout | P0 | All |
-| T-13.2 | Verify Docker Compose full-stack boot (all services healthy) | P0 | All |
-| T-13.3 | Add loading skeletons and error boundaries to frontend | P1 | Block 9–12 |
-| T-13.4 | Responsive QA: verify all views at 360px, 768px, 1280px breakpoints | P0 | Block 9–12 |
-| T-13.5 | Verify footer "Built by P.o.Riot" renders on all pages | P0 | T-9.1 |
-| T-13.6 | Write README.md with setup instructions | P1 | T-13.2 |
-| T-13.7 | Create PR with clean commit history | P0 | T-13.6 |
-
-**Deliverable:** Production-ready, merge-ready pull request with full documentation.
+| Priority | Blocks | Focus |
+|----------|--------|-------|
+| **NOW** | 3, 4, 9, 10 | Localization pivot: admin seeding, M-Pesa simulation, KES enforcement, frontend locale |
+| DONE | 1, 2, 5, 6, 7, 8 | Core infrastructure, models, APIs, real-time, frontend shell |
 
 ---
 
-## Execution Priority Summary
+## Phase 3/4 Implementation Checklist (Current)
 
-| Phase | Blocks | Parallelizable |
-|-------|--------|----------------|
-| Infrastructure | 1 | Sequential |
-| Data Layer | 2 | Sequential (after Block 1) |
-| Backend Core | 3, 4, 5, 6, 7, 8 | Blocks 3–4 parallel; 5–6 depend on 4; 7–8 depend on 6 |
-| Frontend | 9, 10, 11, 12 | Block 9 first; 10–12 parallel after 9 |
-| Integration | 13 | Sequential (final) |
+### Backend Updates Required:
+- [ ] `config.py` — Add FIRST_ADMIN_PHONE, FIRST_ADMIN_PIN, ADMIN_SECRET_TOKEN, currency limits
+- [ ] `main.py` — Add startup event for admin auto-seeding
+- [ ] `routers/auth.py` — Phone format validation (07XX/+254), PIN 4-digit check
+- [ ] `routers/wallet.py` — KES min/max enforcement, M-Pesa STK Push simulation, Daraja webhook
+- [ ] `models/wallet.py` — Add checkout_request_id to Transaction
+- [ ] `.env.example` — Add all new environment variables
+
+### Frontend Updates Required:
+- [ ] `pages/Login.tsx` — Phone + PIN (numeric keypad hint)
+- [ ] `pages/Register.tsx` — Phone format help, 4-digit PIN
+- [ ] `pages/WalletPage.tsx` — M-Pesa deposit flow UI, KES formatting
+- [ ] `components/BetSlip.tsx` — KES formatting, min stake warning
+- [ ] `pages/MyBets.tsx` — KES formatting
+- [ ] `pages/AdminDashboard.tsx` — Match status control, KES formatting
+- [ ] All components — Consistent "KES" prefix on monetary values
 
 ---
 

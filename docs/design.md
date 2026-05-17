@@ -1,150 +1,156 @@
-# JustBet Sportsbook — System Architecture & Technical Design
+# JustBet Sportsbook — System Architecture & Technical Design (v2 Kenya)
 
-> **Version:** 1.0  
+> **Version:** 2.0 — Localized Kenyan Sportsbook  
 > **Date:** 2026-05-17  
+> **Market:** Kenya (KES · M-Pesa · Safaricom)  
 > **Credits:** Built by P.o.Riot  
 
 ---
 
-## 1. High-Level Architecture Overview
+## 1. High-Level Architecture — Multi-Container Deployment
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              DOCKER COMPOSE                                  │
-├─────────────┬─────────────┬─────────────────┬──────────────┬───────────────┤
-│  Frontend   │   API       │  WS Server      │  PostgreSQL  │    Redis      │
-│  (React+    │  (FastAPI)  │  (FastAPI WS)   │  (Port 5432) │  (Port 6379)  │
-│   Vite)     │  Port 8000  │  Port 8001      │              │               │
-│  Port 3000  │             │                 │              │               │
-└──────┬──────┴──────┬──────┴────────┬────────┴──────┬───────┴───────┬───────┘
-       │             │               │               │               │
-       │  HTTP/REST  │               │  SQL/ORM      │  Pub/Sub +    │
-       │◄───────────►│               │◄─────────────►│  Cache Get/Set│
-       │             │               │               │◄─────────────►│
-       │  WebSocket  │               │               │               │
-       │◄────────────────────────────►│               │               │
-       │             │  Publish Odds │               │               │
-       │             │──────────────►│───────────────────────────────►│
-       │             │               │  Subscribe    │               │
-       │             │               │◄──────────────────────────────│
-       └─────────────┴───────────────┴───────────────┴───────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          RENDER CLOUD (Oregon Region)                             │
+├───────────────┬───────────────┬────────────────┬──────────────┬────────────────┤
+│  Static Site  │  Web Service  │  Background    │  PostgreSQL  │  Redis KV      │
+│  (Frontend)   │  (API + WS)   │  Worker        │  (Basic)     │  (Starter)     │
+│  React/Vite   │  FastAPI      │  Settlement    │  Port 5432   │  Port 6379     │
+│  Port 443     │  Port $PORT   │  Loop          │              │                │
+└──────┬────────┴──────┬────────┴───────┬────────┴──────┬───────┴───────┬────────┘
+       │               │                │               │               │
+       │  HTTPS REST   │                │  SQL (asyncpg)│  Pub/Sub +    │
+       │◄─────────────►│                │◄─────────────►│  Cache KV     │
+       │               │  Internal Net  │               │◄─────────────►│
+       │  WSS://       │◄──────────────►│               │               │
+       │◄─────────────►│                │  Internal Net │               │
+       │               │                │◄─────────────────────────────►│
+       └───────────────┴────────────────┴───────────────┴───────────────┘
+                              Render Private Networking
 ```
 
-### Container Services
+### Service Inventory
 
-| Service | Image/Build | Port | Purpose |
-|---------|-------------|------|---------|
-| `frontend` | Node 20 + Vite | 3000 | React SPA serving mobile-first UI |
-| `api` | Python 3.12 + FastAPI | 8000 | REST API (auth, wallet, admin, matches, bets) |
-| `ws` | Python 3.12 + FastAPI | 8001 | Dedicated WebSocket server for odds streaming |
-| `postgres` | postgres:16-alpine | 5432 | Persistent data store |
-| `redis` | redis:7-alpine | 6379 | Pub/Sub message bus + odds cache |
+| Service | Runtime | Plan | Start Command | Purpose |
+|---------|---------|------|---------------|---------|
+| `justbet-frontend` | Static (Node 20) | Starter | `npm run build` → `dist/` | React SPA; mobile-first match grid & bet slip |
+| `justbet-api` | Python 3.12 | Starter | `uvicorn app.main:app --port $PORT --workers 2` | REST API + embedded WebSocket endpoint |
+| `justbet-settlement-worker` | Python 3.12 | Starter | `python -m app.worker` | Async payout processing loop |
+| `justbet-db` | PostgreSQL 16 | Basic | Managed | User/wallet/ticket/match persistent storage |
+| `justbet-redis` | Redis 7 | Starter | Managed | Pub/Sub broker + live odds cache |
 
 ---
 
-## 2. Real-Time Odds Streaming — Redis Pub/Sub + WebSocket Flow
+## 2. Real-Time Odds Engine — Redis Pub/Sub + WebSocket
 
 ```
-┌───────────┐    POST /admin/matches/{id}/odds    ┌───────────┐
-│   Admin   │────────────────────────────────────►│  API      │
-│  Console  │                                      │  Server   │
-└───────────┘                                      └─────┬─────┘
-                                                         │
-                                                    PUBLISH to
-                                                  "odds:{match_id}"
-                                                         │
-                                                         ▼
-                                                   ┌───────────┐
-                                                   │   Redis    │
-                                                   │  Pub/Sub   │
-                                                   └─────┬─────┘
-                                                         │
-                                                    SUBSCRIBE
-                                                  "odds:{match_id}"
-                                                         │
-                                                         ▼
-┌───────────┐     WebSocket frame (JSON)          ┌───────────┐
-│  Punter   │◄────────────────────────────────────│    WS     │
-│  Browser  │                                      │  Server   │
-└───────────┘                                      └───────────┘
+┌───────────┐    PATCH /api/admin/matches/{id}/odds   ┌───────────────┐
+│   Admin   │────────────────────────────────────────►│  API Service  │
+│  Browser  │                                          │  (FastAPI)    │
+└───────────┘                                          └───────┬───────┘
+                                                               │
+                                                    ┌──────────┴──────────┐
+                                                    │ 1. UPDATE matches   │
+                                                    │    SET odds = new   │
+                                                    │ 2. INSERT match_odds│
+                                                    │    (history record) │
+                                                    │ 3. PUBLISH Redis    │
+                                                    │    "odds:{match_id}"│
+                                                    │ 4. SETEX Redis      │
+                                                    │    "odds:current:   │
+                                                    │     {match_id}" 60s │
+                                                    └──────────┬──────────┘
+                                                               │
+                                                          PUBLISH
+                                                               │
+                                                               ▼
+                                                    ┌───────────────────┐
+                                                    │   Redis Pub/Sub   │
+                                                    │  channel: odds:*  │
+                                                    └─────────┬─────────┘
+                                                              │
+                                                        SUBSCRIBE
+                                                        (pattern)
+                                                              │
+                                                              ▼
+┌──────────────┐   WebSocket JSON Frame            ┌───────────────────┐
+│   Punter     │◄──────────────────────────────────│  WS Handler       │
+│  (Mobile)    │                                    │  (embedded in API)│
+└──────────────┘                                    └───────────────────┘
 ```
 
-### Message Format (Odds Delta)
+### WebSocket Odds Delta Frame
 
 ```json
 {
   "type": "odds_update",
-  "match_id": "uuid",
-  "timestamp": "2026-05-17T14:30:00Z",
-  "odds": {
-    "home": 2.15,
-    "draw": 3.40,
-    "away": 3.10
-  },
-  "previous": {
-    "home": 2.10,
-    "draw": 3.40,
-    "away": 3.20
-  }
+  "match_id": "a1b2c3d4-...",
+  "timestamp": "2026-05-17T17:30:00+03:00",
+  "odds": { "home": 2.15, "draw": 3.40, "away": 3.10 },
+  "previous": { "home": 2.10, "draw": 3.40, "away": 3.20 }
 }
 ```
 
-### WebSocket Connection Lifecycle
+### WebSocket Lifecycle
 
-1. Client connects: `ws://host:8001/ws/odds?token=<JWT>`
-2. Server validates JWT in handshake
-3. Client sends subscription: `{"action": "subscribe", "match_ids": ["uuid1", "uuid2"]}`
-4. Server subscribes to Redis channels `odds:uuid1`, `odds:uuid2`
-5. On publish → server forwards delta frame to client
-6. On disconnect → server unsubscribes from Redis channels
-7. Client auto-reconnects with exponential backoff (1s → 2s → 4s → ... → 30s max)
+1. Client connects: `wss://justbet-api.onrender.com/ws/odds?token=<JWT>`
+2. Server validates JWT (30min expiry) on handshake
+3. Client sends: `{"action": "subscribe", "match_ids": ["uuid1", ...]}`
+4. Server sends cached snapshot from Redis `odds:current:{id}`
+5. Server subscribes to Redis `odds:{id}` channels via background listener
+6. On PUBLISH → broadcast delta frame to subscribed clients
+7. Ping/pong every 30s; client auto-reconnects on drop (1s→2s→4s→...→30s)
 
 ---
 
-## 3. Entity-Relationship Schema
+## 3. Entity-Relationship Schema (PostgreSQL 16)
 
 ```
-┌──────────────────┐       ┌──────────────────┐       ┌──────────────────┐
-│      users       │       │     wallets      │       │  transactions    │
-├──────────────────┤       ├──────────────────┤       ├──────────────────┤
-│ id (UUID) PK     │──1:1─►│ id (UUID) PK     │──1:N─►│ id (UUID) PK     │
-│ phone (unique)   │       │ user_id FK       │       │ wallet_id FK     │
-│ password_hash    │       │ real_balance     │       │ type (enum)      │
-│ role (enum)      │       │ bonus_balance    │       │ amount (decimal) │
-│ created_at       │       │ updated_at       │       │ balance_after    │
-│ updated_at       │       └──────────────────┘       │ reference_id     │
-└──────────────────┘                                   │ status (enum)    │
-                                                       │ created_at       │
-                                                       └──────────────────┘
+┌────────────────────┐      ┌────────────────────┐      ┌────────────────────┐
+│       users        │      │      wallets       │      │   transactions     │
+├────────────────────┤      ├────────────────────┤      ├────────────────────┤
+│ id (UUID) PK       │─1:1─►│ id (UUID) PK       │─1:N─►│ id (UUID) PK       │
+│ phone (varchar 15) │      │ user_id FK UNIQUE   │      │ wallet_id FK       │
+│   UNIQUE INDEX     │      │ real_balance DEC    │      │ type (enum)        │
+│ pin_hash (bcrypt)  │      │ bonus_balance DEC   │      │ amount DEC         │
+│ role (enum)        │      │ currency = 'KES'    │      │ balance_after DEC  │
+│ created_at         │      │ updated_at          │      │ reference_id       │
+│ updated_at         │      └────────────────────┘      │ checkout_request_id│
+└────────────────────┘                                   │ status (enum)      │
+                                                         │ created_at         │
+                                                         └────────────────────┘
 
-┌──────────────────┐       ┌──────────────────┐       ┌──────────────────┐
-│     leagues      │       │     matches      │       │   match_odds     │
-├──────────────────┤       ├──────────────────┤       ├──────────────────┤
-│ id (UUID) PK     │──1:N─►│ id (UUID) PK     │──1:N─►│ id (UUID) PK     │
-│ name             │       │ league_id FK     │       │ match_id FK      │
-│ sport            │       │ home_team        │       │ home_odds        │
-│ country          │       │ away_team        │       │ draw_odds        │
-│ created_at       │       │ kickoff_time     │       │ away_odds        │
-└──────────────────┘       │ status (enum)    │       │ timestamp        │
-                           │ home_score       │       └──────────────────┘
-                           │ away_score       │
-                           │ result (enum)    │
-                           │ settled_at       │
-                           │ created_at       │
-                           └──────────────────┘
+┌────────────────────┐      ┌────────────────────┐      ┌────────────────────┐
+│      leagues       │      │      matches       │      │    match_odds      │
+├────────────────────┤      ├────────────────────┤      ├────────────────────┤
+│ id (UUID) PK       │─1:N─►│ id (UUID) PK       │─1:N─►│ id (UUID) PK       │
+│ name               │      │ league_id FK       │      │ match_id FK        │
+│ sport = 'football' │      │ home_team          │      │ home_odds DEC(6,2) │
+│ country            │      │ away_team          │      │ draw_odds DEC(6,2) │
+│ created_at         │      │ kickoff_time (EAT) │      │ away_odds DEC(6,2) │
+└────────────────────┘      │ status (enum)      │      │ timestamp          │
+                            │ home_score INT     │      └────────────────────┘
+                            │ away_score INT     │
+                            │ result (enum)      │
+                            │ home_odds DEC(6,2) │ ← denormalized current
+                            │ draw_odds DEC(6,2) │
+                            │ away_odds DEC(6,2) │
+                            │ settled_at         │
+                            │ created_at         │
+                            └────────────────────┘
 
-┌──────────────────┐       ┌──────────────────┐
-│     tickets      │       │   selections     │
-├──────────────────┤       ├──────────────────┤
-│ id (UUID) PK     │──1:N─►│ id (UUID) PK     │
-│ user_id FK       │       │ ticket_id FK     │
-│ stake (decimal)  │       │ match_id FK      │
-│ total_odds       │       │ market (enum)    │
-│ potential_win    │       │ locked_odds      │
-│ status (enum)    │       │ result (enum)    │
-│ created_at       │       │ created_at       │
-│ settled_at       │       └──────────────────┘
-└──────────────────┘
+┌────────────────────┐      ┌────────────────────┐
+│      tickets       │      │    selections      │
+├────────────────────┤      ├────────────────────┤
+│ id (UUID) PK       │─1:N─►│ id (UUID) PK       │
+│ user_id FK INDEX   │      │ ticket_id FK INDEX │
+│ stake DEC(12,2)    │      │ match_id FK INDEX  │
+│ total_odds DEC     │      │ market (enum)      │
+│ potential_win DEC  │      │ locked_odds DEC    │
+│ status (enum)      │      │ result (enum)      │
+│ created_at         │      │ created_at         │
+│ settled_at         │      └────────────────────┘
+└────────────────────┘
 ```
 
 ### Enum Definitions
@@ -164,262 +170,282 @@
 
 ## 4. API Specification
 
-### 4.1 Authentication
+### 4.1 Authentication (Phone + PIN)
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/api/auth/register` | None | Register with phone + password |
-| POST | `/api/auth/login` | None | Login → JWT access + refresh tokens |
-| POST | `/api/auth/refresh` | Refresh Token | Get new access token |
-| GET | `/api/auth/me` | JWT | Get current user profile |
+| POST | `/api/auth/register` | None | Register: phone (07XX) + 4-digit PIN → JWT |
+| POST | `/api/auth/login` | None | Login: phone + PIN → access + refresh tokens |
+| POST | `/api/auth/refresh` | Refresh | Rotate access token |
+| GET | `/api/auth/me` | JWT | Current user profile |
 
-### 4.2 Matches & Odds (Public)
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/matches` | None | List matches (grouped by league, with current odds) |
-| GET | `/api/matches/{id}` | None | Get single match with full odds history |
-| GET | `/api/leagues` | None | List all leagues |
-
-### 4.3 Bet Slip & Tickets
+### 4.2 Matches & Odds (Public — no auth)
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/api/tickets` | JWT | Place a bet (array of selections + stake) |
-| GET | `/api/tickets` | JWT | List user's tickets with status |
-| GET | `/api/tickets/{id}` | JWT | Get ticket details |
+| GET | `/api/matches` | None | Matches grouped by league with current odds |
+| GET | `/api/matches/{id}` | None | Single match + odds history |
+| GET | `/api/leagues` | None | All leagues |
 
-### 4.4 Wallet & Transactions
+### 4.3 Bet Slip & Tickets (Punter)
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/api/wallet` | JWT | Get wallet balances |
-| POST | `/api/wallet/deposit` | JWT | Initiate deposit (simulated M-Pesa) |
-| POST | `/api/wallet/withdraw` | JWT | Initiate withdrawal |
-| GET | `/api/wallet/transactions` | JWT | List transaction history |
-| POST | `/api/webhooks/payment` | API Key | Payment gateway callback |
+| POST | `/api/tickets` | JWT | Place bet: selections[] + stake (KES ≥ 50) |
+| GET | `/api/tickets` | JWT | My tickets (paginated) |
+| GET | `/api/tickets/{id}` | JWT | Ticket detail with selections |
+
+### 4.4 Wallet & M-Pesa (Punter)
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/api/wallet` | JWT | Balances (real + bonus in KES) |
+| POST | `/api/wallet/deposit` | JWT | Initiate M-Pesa STK Push (KES 100–150,000) |
+| POST | `/api/wallet/withdraw` | JWT | Initiate M-Pesa B2C (KES 100–70,000) |
+| GET | `/api/wallet/transactions` | JWT | Transaction history (paginated) |
+| POST | `/api/webhooks/mpesa/callback` | API Key | M-Pesa confirmation webhook |
 
 ### 4.5 Admin Operations
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | POST | `/api/admin/leagues` | Admin | Create league |
-| POST | `/api/admin/matches` | Admin | Create match with initial odds |
-| PATCH | `/api/admin/matches/{id}/odds` | Admin | Update live odds (triggers Redis publish) |
-| POST | `/api/admin/matches/{id}/settle` | Admin | Settle match with result |
-| GET | `/api/admin/liability` | Admin | Get liability per match |
-| GET | `/api/admin/dashboard` | Admin | Aggregate stats (active bets, revenue, users) |
+| POST | `/api/admin/matches` | Admin | Create match + initial odds |
+| PATCH | `/api/admin/matches/{id}/odds` | Admin | Update odds → Redis PUBLISH |
+| PATCH | `/api/admin/matches/{id}/status` | Admin | Change status (upcoming→live→ended) |
+| POST | `/api/admin/matches/{id}/settle` | Admin | Input score → evaluate → enqueue payouts |
+| GET | `/api/admin/liability` | Admin | Liability per match (KES) |
+| GET | `/api/admin/dashboard` | Admin | Aggregate stats |
 
 ### 4.6 WebSocket
 
 | Endpoint | Auth | Description |
 |----------|------|-------------|
-| `ws://host:8001/ws/odds?token=<JWT>` | JWT (query) | Real-time odds stream |
+| `wss://host/ws/odds?token=<JWT>` | JWT (query) | Real-time odds stream |
 
 ---
 
-## 5. Settlement Worker — Async Payout Pipeline
+## 5. Settlement Worker — Background Payout Pipeline
 
 ```
-┌───────────┐     POST /admin/matches/{id}/settle     ┌───────────┐
-│   Admin   │────────────────────────────────────────►│  API      │
-└───────────┘                                          └─────┬─────┘
-                                                             │
-                                                    1. Mark match as "settled"
-                                                    2. Query all tickets with 
-                                                       selections on this match
-                                                    3. Evaluate each selection
-                                                    4. For fully-won tickets:
-                                                             │
-                                                             ▼
-                                                    ┌───────────────┐
-                                                    │  Background   │
-                                                    │  Task Queue   │
-                                                    │  (asyncio)    │
-                                                    └───────┬───────┘
-                                                            │
-                                                   For each winning ticket:
-                                                            │
-                                                            ▼
-                                              ┌─────────────────────────────┐
-                                              │  BEGIN TRANSACTION          │
-                                              │  1. Lock wallet row (FOR    │
-                                              │     UPDATE)                 │
-                                              │  2. Credit real_balance     │
-                                              │     += stake × locked_odds  │
-                                              │  3. Insert transaction      │
-                                              │     record                  │
-                                              │  4. Update ticket status    │
-                                              │     = 'won'                 │
-                                              │  COMMIT                     │
-                                              └─────────────────────────────┘
-                                                            │
-                                                   On Failure (max 3 retries):
-                                                            │
-                                                            ▼
-                                              ┌─────────────────────────────┐
-                                              │  Exponential Backoff:       │
-                                              │  Retry 1: 2s               │
-                                              │  Retry 2: 4s               │
-                                              │  Retry 3: 8s               │
-                                              │  → Alert Admin on failure  │
-                                              └─────────────────────────────┘
+┌─────────────┐   POST /admin/matches/{id}/settle   ┌─────────────────┐
+│    Admin     │────────────────────────────────────►│   API Service   │
+└─────────────┘                                      └────────┬────────┘
+                                                              │
+                                                    1. match.status = 'settled'
+                                                    2. match.result = home_win|draw|away_win
+                                                    3. Evaluate all selections for match
+                                                    4. Mark tickets won/lost
+                                                    5. For WON tickets: status = 'won'
+                                                              │
+                                                              ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    BACKGROUND WORKER (python -m app.worker)               │
+│                                                                           │
+│  Poll loop (every 5s):                                                   │
+│    1. SELECT tickets WHERE status='won' AND no payout transaction exists │
+│    2. For each winning ticket:                                           │
+│       a. BEGIN TRANSACTION                                               │
+│       b. SELECT wallet FOR UPDATE (row lock)                             │
+│       c. Idempotency: check reference_id not already used               │
+│       d. wallet.real_balance += ticket.potential_win                     │
+│       e. INSERT transaction (type=bet_winning, ref=ticket.id)            │
+│       f. COMMIT                                                          │
+│    3. On failure: retry with backoff 2s → 4s → 8s (max 3 attempts)      │
+│    4. After 3 failures: log CRITICAL, skip ticket, alert admin           │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Idempotency Guarantee
 
-- Each ticket settlement is guarded by a status check: only tickets in `active` status are processed
-- The ticket ID is used as an idempotency key in the transaction `reference_id`
-- Re-running settlement on an already-settled match produces zero new transactions
+- `reference_id` = ticket UUID in transaction table
+- Worker checks `WHERE reference_id = ticket.id AND type = 'bet_winning'` before processing
+- Re-running settlement on same match → zero new transactions
 
 ---
 
-## 6. Caching Strategy (Redis)
+## 6. M-Pesa Integration (Simulated Daraja API)
+
+### Deposit Flow (STK Push Simulation)
+
+```
+Punter                    API                     "M-Pesa" (Simulated)
+  │                        │                              │
+  │  POST /wallet/deposit  │                              │
+  │  {amount: 500, phone}  │                              │
+  │───────────────────────►│                              │
+  │                        │  Create pending transaction  │
+  │                        │  Generate checkout_request_id│
+  │                        │                              │
+  │  ◄─── 200 OK ─────────│                              │
+  │  "Enter M-Pesa PIN"   │                              │
+  │                        │──── (auto after 3s) ────────►│
+  │                        │                              │
+  │                        │◄─── Callback ───────────────│
+  │                        │  {ResultCode: 0, Amount}     │
+  │                        │                              │
+  │                        │  Credit wallet               │
+  │                        │  Mark txn completed          │
+  │  ◄─── WS notification─│                              │
+  │  "Deposit confirmed"  │                              │
+```
+
+### Request/Response Format (Daraja-style)
+
+**STK Push Request:**
+```json
+{
+  "BusinessShortCode": "174379",
+  "TransactionType": "CustomerPayBillOnline",
+  "Amount": 500,
+  "PartyA": "254712345678",
+  "PartyB": "174379",
+  "PhoneNumber": "254712345678",
+  "AccountReference": "JustBet",
+  "TransactionDesc": "Deposit"
+}
+```
+
+**Callback (simulated):**
+```json
+{
+  "Body": {
+    "stkCallback": {
+      "MerchantRequestID": "uuid",
+      "CheckoutRequestID": "ws_CO_xxxxx",
+      "ResultCode": 0,
+      "ResultDesc": "The service request is processed successfully.",
+      "CallbackMetadata": {
+        "Item": [
+          {"Name": "Amount", "Value": 500.00},
+          {"Name": "MpesaReceiptNumber", "Value": "QKJ3A9B7ZP"},
+          {"Name": "PhoneNumber", "Value": 254712345678}
+        ]
+      }
+    }
+  }
+}
+```
+
+---
+
+## 7. Admin Console Specification
+
+### Dashboard View
+- **Stat Cards:** Total Users | Active Tickets | Total Stakes (KES) | Total Liability (KES)
+- **Liability Table:** Per-match breakdown of `sum(potential_win)` for active tickets
+
+### Match Management
+- **Create Match:** League dropdown, Home/Away teams, Kickoff (EAT), Initial odds (1/X/2)
+- **Update Odds:** Real-time slider/input per outcome → saves + publishes to Redis instantly
+- **Change Status:** Buttons to transition: Upcoming → Live → Ended
+
+### Settlement Panel
+- **Select Match** (from ended matches list)
+- **Input Score:** Home goals / Away goals
+- **Settle Button:** Triggers `/api/admin/matches/{id}/settle`
+- **Result Display:** Shows tickets processed, won/lost counts, total payout amount
+
+### Environment-Based Admin Seeding
+```
+FIRST_ADMIN_PHONE=0712345678
+FIRST_ADMIN_PIN=1234
+ADMIN_SECRET_TOKEN=super-secret-admin-creation-key
+```
+On first boot (empty users table), the system auto-creates:
+```python
+User(phone="0712345678", pin_hash=bcrypt("1234"), role="admin")
+Wallet(user_id=admin.id, real_balance=0, bonus_balance=0)
+```
+
+---
+
+## 8. Caching Strategy (Redis)
 
 | Key Pattern | Value | TTL | Purpose |
 |-------------|-------|-----|---------|
-| `odds:current:{match_id}` | JSON odds snapshot | 60s | Serve latest odds to new WS connections |
-| `match:list:active` | JSON array of active matches | 30s | Fast match listing without DB query |
-| `session:{user_id}` | JWT metadata | 15min | Rate limit tracking |
-| `ratelimit:{ip}` | Request counter | 60s | Anonymous rate limiting |
+| `odds:current:{match_id}` | JSON `{home, draw, away}` | 60s | Serve to new WS subscribers |
+| `match:list:active` | JSON array of active matches | 30s | Fast match listing cache |
+| `ratelimit:{ip}:{endpoint}` | Request counter | 60s | Per-IP rate limiting |
+| `mpesa:checkout:{id}` | Pending deposit metadata | 300s | Track STK Push status |
 
 ---
 
-## 7. Frontend Architecture
+## 9. Frontend Architecture (React 18 + TypeScript)
 
 ```
-src/
+frontend/src/
 ├── components/
-│   ├── MatchGrid/          # League-grouped match list with odds cells
-│   ├── BetSlip/            # Drawer (mobile) / Sidebar (desktop)
-│   ├── OddsCell/           # Individual odds button with flash animation
-│   ├── Wallet/             # Balance display, deposit/withdraw forms
-│   ├── Auth/               # Login/Register forms
-│   └── Admin/              # Dashboard, match management, settlement
-├── hooks/
-│   ├── useWebSocket.ts     # WebSocket connection manager with reconnect
-│   ├── useBetSlip.ts       # Bet slip state management
-│   └── useAuth.ts          # JWT token management
-├── stores/
-│   └── betSlipStore.ts     # Zustand store for bet selections
-├── services/
-│   ├── api.ts              # Axios/fetch wrapper with interceptors
-│   └── ws.ts               # WebSocket client singleton
+│   ├── MatchGrid.tsx       # League-grouped, compact, touch-optimized
+│   ├── OddsCell.tsx        # 1/X/2 button with flash animation
+│   ├── BetSlip.tsx         # Mobile drawer + desktop sidebar
+│   ├── Navbar.tsx          # Logo, wallet badge, nav links
+│   └── Footer.tsx          # "Built by P.o.Riot" permanent credit
 ├── pages/
-│   ├── Home.tsx            # Match grid (default view)
-│   ├── MyBets.tsx          # Ticket history
-│   ├── WalletPage.tsx      # Wallet management
-│   └── AdminDashboard.tsx  # Admin panel
+│   ├── Home.tsx            # Match grid (default route)
+│   ├── Login.tsx           # Phone + PIN form
+│   ├── Register.tsx        # Phone + PIN + confirm PIN
+│   ├── WalletPage.tsx      # KES balance, M-Pesa deposit/withdraw
+│   ├── MyBets.tsx          # Ticket list with status badges
+│   └── AdminDashboard.tsx  # Stats, match CRUD, settlement, odds update
+├── stores/
+│   ├── authStore.ts        # Zustand: user, tokens, login/logout
+│   └── betSlipStore.ts     # Zustand: selections, stake, totals (persisted)
+├── services/
+│   ├── api.ts              # Axios with JWT interceptor + auto-refresh
+│   └── ws.ts               # WebSocket singleton with reconnect
+├── hooks/
+│   └── useWebSocket.ts     # Subscribe to match odds channels
 ├── types/
 │   └── index.ts            # TypeScript interfaces
-└── App.tsx                 # Router + layout + footer ("Built by P.o.Riot")
+└── App.tsx                 # Router + Layout + Footer
 ```
 
 ### State Management
 
 | Concern | Solution |
 |---------|----------|
-| Server state (matches, tickets) | React Query with 30s stale time |
-| Real-time odds | WebSocket → Zustand store → React Query cache invalidation |
-| Bet slip selections | Zustand (persisted to localStorage) |
-| Auth tokens | React Context + httpOnly cookies (refresh) |
-
-### Responsive Breakpoints
-
-| Breakpoint | Layout |
-|------------|--------|
-| < 360px | Compact single-column, collapsed odds |
-| 360–768px | Mobile: full match grid, bottom bet slip drawer |
-| 768–1280px | Tablet: 2-column, floating bet slip |
-| > 1280px | Desktop: 3-column grid + sticky right sidebar |
+| Server data (matches, tickets, wallet) | React Query (staleTime: 30s) |
+| Real-time odds | WebSocket → Zustand → React Query cache invalidation |
+| Bet slip | Zustand with `persist` middleware → localStorage |
+| Auth | Zustand with token storage + auto-refresh interceptor |
 
 ---
 
-## 8. Security Architecture
+## 10. Security Architecture
 
-```
-┌─────────────────────────────────────────────────────┐
-│                  Security Layers                      │
-├─────────────────────────────────────────────────────┤
-│ Layer 1: Network                                     │
-│   • CORS whitelist (frontend origin only)           │
-│   • Rate limiting (100/min auth, 30/min anon)       │
-│   • Request size limits (1MB max body)              │
-├─────────────────────────────────────────────────────┤
-│ Layer 2: Authentication                              │
-│   • JWT RS256 signing (access: 15min, refresh: 7d)  │
-│   • Password hashing: bcrypt cost=12               │
-│   • WebSocket auth via query token                  │
-├─────────────────────────────────────────────────────┤
-│ Layer 3: Authorization                               │
-│   • Role-based: punter vs admin                     │
-│   • Resource ownership validation                   │
-│   • Admin endpoints isolated under /api/admin/*     │
-├─────────────────────────────────────────────────────┤
-│ Layer 4: Data Integrity                              │
-│   • Row-level locking on wallet operations          │
-│   • Immutable transaction ledger                    │
-│   • Idempotent settlement operations               │
-└─────────────────────────────────────────────────────┘
-```
+| Layer | Implementation |
+|-------|---------------|
+| Network | CORS (frontend origin only); rate limiting; HTTPS everywhere (Render default) |
+| Auth | JWT HS256; access 30min + refresh 30d; PIN bcrypt(12) |
+| Authorization | Role enum in JWT claims; admin guard middleware |
+| Data | Row-level locking on wallets; immutable transaction ledger; idempotent settlement |
+| Secrets | `JWT_SECRET` auto-generated; `FIRST_ADMIN_PIN` env-only; `ADMIN_SECRET_TOKEN` for admin creation |
+| WS | Token-in-query validated on handshake; reject 4001 on invalid |
 
 ---
 
-## 9. Docker Compose Topology
+## 11. Render Deployment Topology
 
 ```yaml
-# Simplified schema (full file in /docker-compose.yml)
+# render.yaml provisions:
+databases:
+  - justbet-db (PostgreSQL 16, Basic plan)
+
 services:
-  frontend:
-    build: ./frontend
-    ports: ["3000:3000"]
-    depends_on: [api]
-    environment:
-      - VITE_API_URL=http://api:8000
-      - VITE_WS_URL=ws://ws:8001
+  - justbet-frontend (Static Site, Vite build)
+  - justbet-api (Web Service, FastAPI, Starter plan)
+  - justbet-settlement-worker (Background Worker)
 
-  api:
-    build: ./backend
-    ports: ["8000:8000"]
-    depends_on: [postgres, redis]
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://...
-      - REDIS_URL=redis://redis:6379
-      - JWT_SECRET=...
+keyValueStores:
+  - justbet-redis (Starter plan, allkeys-lru)
 
-  ws:
-    build: ./backend
-    command: uvicorn ws_server:app --host 0.0.0.0 --port 8001
-    ports: ["8001:8001"]
-    depends_on: [redis]
-    environment:
-      - REDIS_URL=redis://redis:6379
-      - JWT_SECRET=...
-
-  postgres:
-    image: postgres:16-alpine
-    ports: ["5432:5432"]
-    volumes: [pgdata:/var/lib/postgresql/data]
-
-  redis:
-    image: redis:7-alpine
-    ports: ["6379:6379"]
-
-volumes:
-  pgdata:
+# Environment variables include:
+# FIRST_ADMIN_PHONE, FIRST_ADMIN_PIN, ADMIN_SECRET_TOKEN
+# JWT_SECRET (auto-generated), DATABASE_URL, REDIS_URL
 ```
 
----
-
-## 10. Deployment & Scaling Notes
-
-| Concern | Strategy |
-|---------|----------|
-| Horizontal WS scaling | Multiple `ws` containers + Redis Pub/Sub ensures all clients receive updates regardless of which node they're connected to |
-| Database migrations | Alembic (Python) — auto-run on API container startup via entrypoint script |
-| Zero-downtime deploy | Rolling updates via Docker Compose profiles or orchestrator |
-| Monitoring | Structured JSON logging → stdout (Docker captures); health check endpoints |
-| Backup | PostgreSQL pg_dump scheduled via cron container or external job |
+All services communicate via Render's internal private networking (10.x.x.x). External traffic hits only the frontend static site and API web service via HTTPS.
 
 ---
 

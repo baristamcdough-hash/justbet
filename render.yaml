@@ -1,15 +1,15 @@
 # ============================================================================
-# JustBet Sportsbook — Render Blueprint (Infrastructure-as-Code)
+# JustBet Sportsbook — Render Blueprint (v2 Kenya Localized)
 # Built by P.o.Riot | Credits P.o.Riot
 # ============================================================================
-# Deploy: Connect this repo to Render, and this file auto-provisions all
-# services, databases, and environment variables via Render Blueprints.
+# Deploy: Connect this repo to Render Dashboard → Blueprints.
+# Render auto-detects render.yaml and provisions all services.
 # Docs: https://render.com/docs/blueprint-spec
 # ============================================================================
 
 databases:
   # --------------------------------------------------------------------------
-  # PostgreSQL — Primary data store for users, wallets, tickets, matches
+  # PostgreSQL — Primary data store (users, wallets, tickets, matches)
   # --------------------------------------------------------------------------
   - name: justbet-db
     plan: basic
@@ -21,7 +21,7 @@ databases:
 
 services:
   # --------------------------------------------------------------------------
-  # 1. STATIC SITE — React Frontend (Vite build)
+  # 1. STATIC SITE — React Frontend (Vite → dist)
   # --------------------------------------------------------------------------
   - type: web
     name: justbet-frontend
@@ -61,7 +61,7 @@ services:
         value: "20"
 
   # --------------------------------------------------------------------------
-  # 2. WEB SERVICE — FastAPI REST API + WebSocket (Starter tier for persistent WS)
+  # 2. WEB SERVICE — FastAPI REST API + WebSocket (Starter for persistent WS)
   # --------------------------------------------------------------------------
   - type: web
     name: justbet-api
@@ -75,18 +75,16 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      # Database — references the Render-managed Postgres instance
+      # ── Database ──
       - key: DATABASE_URL
         fromDatabase:
           name: justbet-db
           property: connectionString
-        # Note: Render provides postgresql:// — our app needs postgresql+asyncpg://
-        # We handle this via a transform in the app config or prestart script
       - key: DATABASE_URL_INTERNAL
         fromDatabase:
           name: justbet-db
           property: internalConnectionString
-      # Redis — references the Render Key-Value store
+      # ── Redis ──
       - key: REDIS_URL
         fromService:
           name: justbet-redis
@@ -97,16 +95,23 @@ services:
           name: justbet-redis
           type: redis
           property: internalConnectionString
-      # JWT & Security
+      # ── JWT & Security ──
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_ALGORITHM
         value: HS256
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
-        value: "15"
+        value: "30"
       - key: REFRESH_TOKEN_EXPIRE_DAYS
-        value: "7"
-      # Application
+        value: "30"
+      # ── Admin Seeding (First Boot) ──
+      - key: FIRST_ADMIN_PHONE
+        sync: false  # Set manually in Render dashboard
+      - key: FIRST_ADMIN_PIN
+        sync: false  # Set manually in Render dashboard
+      - key: ADMIN_SECRET_TOKEN
+        generateValue: true
+      # ── Application ──
       - key: APP_NAME
         value: JustBet
       - key: APP_ENV
@@ -115,20 +120,35 @@ services:
         value: "false"
       - key: PYTHON_VERSION
         value: "3.12.3"
-      # CORS — allows frontend origin
+      # ── CORS ──
       - key: CORS_ORIGINS
         fromService:
           name: justbet-frontend
           type: web
           property: url
-      # WebSocket public URL (for frontend to connect)
+      # ── WebSocket Public URL ──
       - key: RENDER_WS_URL
         value: wss://justbet-api.onrender.com/ws/odds
-      # Rate Limiting
+      # ── Rate Limiting ──
       - key: RATE_LIMIT_AUTH
         value: "100"
       - key: RATE_LIMIT_ANON
         value: "30"
+      # ── Kenya Locale ──
+      - key: DEFAULT_CURRENCY
+        value: KES
+      - key: MIN_STAKE
+        value: "50"
+      - key: MAX_STAKE
+        value: "500000"
+      - key: MIN_DEPOSIT
+        value: "100"
+      - key: MAX_DEPOSIT
+        value: "150000"
+      - key: MIN_WITHDRAWAL
+        value: "100"
+      - key: MAX_WITHDRAWAL
+        value: "70000"
 
   # --------------------------------------------------------------------------
   # 3. BACKGROUND WORKER — Settlement processor & async payout engine
@@ -144,18 +164,18 @@ services:
     startCommand: python -m app.worker
     autoDeploy: true
     envVars:
-      # Database — uses internal networking for low-latency DB access
+      # ── Database (internal networking) ──
       - key: DATABASE_URL
         fromDatabase:
           name: justbet-db
           property: internalConnectionString
-      # Redis — uses internal networking
+      # ── Redis (internal networking) ──
       - key: REDIS_URL
         fromService:
           name: justbet-redis
           type: redis
           property: internalConnectionString
-      # JWT (needed for token validation in shared codebase)
+      # ── Shared secrets ──
       - key: JWT_SECRET
         fromService:
           name: justbet-api
@@ -163,7 +183,18 @@ services:
           envVarKey: JWT_SECRET
       - key: JWT_ALGORITHM
         value: HS256
-      # Application
+      # ── Admin Seeding (shared with API for first-boot logic) ──
+      - key: FIRST_ADMIN_PHONE
+        fromService:
+          name: justbet-api
+          type: web
+          envVarKey: FIRST_ADMIN_PHONE
+      - key: FIRST_ADMIN_PIN
+        fromService:
+          name: justbet-api
+          type: web
+          envVarKey: FIRST_ADMIN_PIN
+      # ── Application ──
       - key: APP_NAME
         value: JustBet
       - key: APP_ENV
@@ -172,11 +203,13 @@ services:
         value: "false"
       - key: PYTHON_VERSION
         value: "3.12.3"
-      # Worker-specific config
+      # ── Worker Config ──
       - key: WORKER_POLL_INTERVAL
         value: "5"
       - key: WORKER_MAX_RETRIES
         value: "3"
+      - key: DEFAULT_CURRENCY
+        value: KES
 
 # --------------------------------------------------------------------------
 # 4. REDIS KEY-VALUE STORE — Pub/Sub broker + live odds cache
@@ -186,4 +219,4 @@ keyValueStores:
     plan: starter
     region: oregon
     maxmemoryPolicy: allkeys-lru
-    ipAllowList: []  # Only internal services can connect
+    ipAllowList: []  # Only internal services connect

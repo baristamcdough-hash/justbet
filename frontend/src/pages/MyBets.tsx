@@ -2,6 +2,10 @@ import { useQuery } from '@tanstack/react-query';
 import api from '../services/api';
 import { Ticket } from '../types';
 
+function formatKES(amount: number): string {
+  return `KES ${amount.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 const statusColors: Record<string, string> = {
   active: 'bg-blue-500/20 text-blue-400',
   won: 'bg-green-500/20 text-green-400',
@@ -26,6 +30,7 @@ export default function MyBets() {
       {tickets?.length === 0 && (
         <div className="card p-8 text-center text-gray-400">
           <p>No bets placed yet</p>
+          <p className="text-sm mt-1">Select odds from the match grid to start</p>
         </div>
       )}
 
@@ -41,17 +46,14 @@ export default function MyBets() {
                 {ticket.status}
               </span>
               <span className="text-xs text-gray-500">
-                {new Date(ticket.created_at).toLocaleDateString()}
+                {new Date(ticket.created_at).toLocaleDateString('en-KE')}
               </span>
             </div>
 
             {/* Selections */}
             <div className="space-y-1 mb-3">
               {ticket.selections.map((sel) => (
-                <div
-                  key={sel.id}
-                  className="flex items-center justify-between text-sm"
-                >
+                <div key={sel.id} className="flex items-center justify-between text-sm">
                   <span className="text-gray-300 capitalize">{sel.market}</span>
                   <span className="font-medium">{sel.locked_odds.toFixed(2)}</span>
                 </div>
@@ -62,12 +64,12 @@ export default function MyBets() {
             <div className="border-t border-gray-700/50 pt-2 flex items-center justify-between text-sm">
               <div>
                 <span className="text-gray-400">Stake: </span>
-                <span className="font-medium">KES {ticket.stake.toFixed(2)}</span>
+                <span className="font-medium">{formatKES(ticket.stake)}</span>
               </div>
               <div>
                 <span className="text-gray-400">Win: </span>
                 <span className="font-bold text-accent-yellow">
-                  KES {ticket.potential_win.toFixed(2)}
+                  {formatKES(ticket.potential_win)}
                 </span>
               </div>
             </div>

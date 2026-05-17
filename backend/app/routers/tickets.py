@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import List
 from decimal import Decimal
 from app.database import get_db
+from app.config import get_settings
 from app.models.user import User
 from app.models.wallet import Wallet, Transaction, TransactionType, TransactionStatus
 from app.models.ticket import Ticket, Selection, TicketStatus, MarketType
@@ -12,6 +13,7 @@ from app.models.match import Match, MatchStatus
 from app.auth import get_current_user
 
 router = APIRouter()
+settings = get_settings()
 
 
 class SelectionInput(BaseModel):
@@ -39,6 +41,7 @@ class TicketResponse(BaseModel):
     total_odds: float
     potential_win: float
     status: str
+    currency: str = "KES"
     created_at: str
     selections: List[SelectionResponse]
 
@@ -49,12 +52,27 @@ async def place_bet(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Place a bet with one or more selections."""
+    """Place a bet with one or more selections (KES)."""
     if not req.selections:
         raise HTTPException(status_code=400, detail="At least one selection required")
 
-    if req.stake <= 0:
-        raise HTTPException(status_code=400, detail="Stake must be positive")
+    if len(req.selections) > settings.MAX_SELECTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum {settings.MAX_SELECTIONS} selections per slip",
+        )
+
+    if req.stake < settings.MIN_STAKE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Minimum stake is KES {settings.MIN_STAKE:,}",
+        )
+
+    if req.stake > settings.MAX_STAKE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum stake is KES {settings.MAX_STAKE:,}",
+        )
 
     # Validate all matches exist and are active
     match_ids = [s.match_id for s in req.selections]
@@ -77,6 +95,13 @@ async def place_bet(
     stake = Decimal(str(req.stake))
     potential_win = round(stake * total_odds, 2)
 
+    # Enforce max potential win (KES)
+    if potential_win > settings.MAX_POTENTIAL_WIN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum potential win is KES {settings.MAX_POTENTIAL_WIN:,}. Reduce stake or selections.",
+        )
+
     # Lock wallet and validate balance
     wallet_result = await db.execute(
         select(Wallet)
@@ -89,7 +114,10 @@ async def place_bet(
 
     total_balance = wallet.real_balance + wallet.bonus_balance
     if total_balance < stake:
-        raise HTTPException(status_code=400, detail="Insufficient balance")
+        raise HTTPException(
+            status_code=400,
+            detail="Salio haitoshi — Insufficient balance. Please deposit to continue.",
+        )
 
     # Deduct from bonus first, then real balance
     remaining_stake = stake
@@ -146,6 +174,7 @@ async def place_bet(
         total_odds=float(ticket.total_odds),
         potential_win=float(ticket.potential_win),
         status=ticket.status.value,
+        currency="KES",
         created_at=ticket.created_at.isoformat(),
         selections=[
             SelectionResponse(
@@ -165,7 +194,7 @@ async def list_tickets(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List user's tickets."""
+    """List user's tickets (KES)."""
     from sqlalchemy.orm import selectinload
     result = await db.execute(
         select(Ticket)
@@ -183,6 +212,7 @@ async def list_tickets(
             total_odds=float(t.total_odds),
             potential_win=float(t.potential_win),
             status=t.status.value,
+            currency="KES",
             created_at=t.created_at.isoformat(),
             selections=[
                 SelectionResponse(
@@ -205,7 +235,7 @@ async def get_ticket(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get single ticket detail."""
+    """Get single ticket detail (KES)."""
     from sqlalchemy.orm import selectinload
     result = await db.execute(
         select(Ticket)
@@ -222,6 +252,7 @@ async def get_ticket(
         total_odds=float(ticket.total_odds),
         potential_win=float(ticket.potential_win),
         status=ticket.status.value,
+        currency="KES",
         created_at=ticket.created_at.isoformat(),
         selections=[
             SelectionResponse(

@@ -3,18 +3,16 @@ import { useBetSlipStore } from '../stores/betSlipStore';
 import { useAuthStore } from '../stores/authStore';
 import api from '../services/api';
 
+/** Format KES with thousand separators */
+function formatKES(amount: number): string {
+  return `KES ${amount.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 export default function BetSlip() {
   const {
-    selections,
-    stake,
-    isOpen,
-    setStake,
-    removeSelection,
-    clearSlip,
-    setOpen,
-    totalOdds,
-    potentialWin,
-    selectionCount,
+    selections, stake, isOpen,
+    setStake, removeSelection, clearSlip, setOpen,
+    totalOdds, potentialWin, selectionCount,
   } = useBetSlipStore();
 
   const { isAuthenticated } = useAuthStore();
@@ -28,8 +26,12 @@ export default function BetSlip() {
       setMessage({ type: 'error', text: 'Please login to place a bet' });
       return;
     }
-    if (stake <= 0) {
-      setMessage({ type: 'error', text: 'Enter a valid stake amount' });
+    if (stake < 50) {
+      setMessage({ type: 'error', text: 'Minimum stake is KES 50' });
+      return;
+    }
+    if (stake > 500000) {
+      setMessage({ type: 'error', text: 'Maximum stake is KES 500,000' });
       return;
     }
 
@@ -57,7 +59,7 @@ export default function BetSlip() {
     }
   };
 
-  // Mobile floating button
+  // Mobile floating badge
   if (!isOpen && count > 0) {
     return (
       <button
@@ -81,17 +83,11 @@ export default function BetSlip() {
       >
         <div className="bg-dark-300 border-t border-gray-700 rounded-t-2xl max-h-[70vh] overflow-y-auto">
           <SlipContent
-            selections={selections}
-            stake={stake}
-            setStake={setStake}
-            removeSelection={removeSelection}
-            totalOdds={totalOdds()}
-            potentialWin={potentialWin()}
-            onPlace={handlePlaceBet}
-            isPlacing={isPlacing}
-            message={message}
-            onClose={() => setOpen(false)}
-            onClear={clearSlip}
+            selections={selections} stake={stake} setStake={setStake}
+            removeSelection={removeSelection} totalOdds={totalOdds()}
+            potentialWin={potentialWin()} onPlace={handlePlaceBet}
+            isPlacing={isPlacing} message={message}
+            onClose={() => setOpen(false)} onClear={clearSlip}
           />
         </div>
       </div>
@@ -100,26 +96,17 @@ export default function BetSlip() {
       <div className="hidden md:block w-80 shrink-0">
         <div className="sticky top-4 card overflow-hidden">
           <SlipContent
-            selections={selections}
-            stake={stake}
-            setStake={setStake}
-            removeSelection={removeSelection}
-            totalOdds={totalOdds()}
-            potentialWin={potentialWin()}
-            onPlace={handlePlaceBet}
-            isPlacing={isPlacing}
-            message={message}
-            onClear={clearSlip}
+            selections={selections} stake={stake} setStake={setStake}
+            removeSelection={removeSelection} totalOdds={totalOdds()}
+            potentialWin={potentialWin()} onPlace={handlePlaceBet}
+            isPlacing={isPlacing} message={message} onClear={clearSlip}
           />
         </div>
       </div>
 
       {/* Mobile overlay */}
       {isOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-40 md:hidden"
-          onClick={() => setOpen(false)}
-        />
+        <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={() => setOpen(false)} />
       )}
     </>
   );
@@ -140,17 +127,8 @@ interface SlipContentProps {
 }
 
 function SlipContent({
-  selections,
-  stake,
-  setStake,
-  removeSelection,
-  totalOdds,
-  potentialWin,
-  onPlace,
-  isPlacing,
-  message,
-  onClose,
-  onClear,
+  selections, stake, setStake, removeSelection,
+  totalOdds, potentialWin, onPlace, isPlacing, message, onClose, onClear,
 }: SlipContentProps) {
   return (
     <div className="p-4">
@@ -160,13 +138,9 @@ function SlipContent({
           Bet Slip <span className="text-primary-400">({selections.length})</span>
         </h3>
         <div className="flex gap-2">
-          <button onClick={onClear} className="text-xs text-gray-400 hover:text-white">
-            Clear
-          </button>
+          <button onClick={onClear} className="text-xs text-gray-400 hover:text-white">Clear</button>
           {onClose && (
-            <button onClick={onClose} className="text-gray-400 hover:text-white">
-              ✕
-            </button>
+            <button onClick={onClose} className="text-gray-400 hover:text-white text-lg">✕</button>
           )}
         </div>
       </div>
@@ -174,24 +148,14 @@ function SlipContent({
       {/* Selections */}
       <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
         {selections.map((sel) => (
-          <div
-            key={sel.match_id}
-            className="flex items-center justify-between bg-dark-400 rounded-lg p-2"
-          >
+          <div key={sel.match_id} className="flex items-center justify-between bg-dark-400 rounded-lg p-2">
             <div className="flex-1 min-w-0">
               <p className="text-xs text-gray-400 truncate">{sel.match_label}</p>
               <p className="text-sm font-medium">{sel.market_label}</p>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-primary-400 font-bold text-sm">
-                {sel.odds.toFixed(2)}
-              </span>
-              <button
-                onClick={() => removeSelection(sel.match_id)}
-                className="text-gray-500 hover:text-red-400 text-xs"
-              >
-                ✕
-              </button>
+              <span className="text-primary-400 font-bold text-sm">{sel.odds.toFixed(2)}</span>
+              <button onClick={() => removeSelection(sel.match_id)} className="text-gray-500 hover:text-red-400 text-xs">✕</button>
             </div>
           </div>
         ))}
@@ -203,46 +167,57 @@ function SlipContent({
         <span className="font-bold text-primary-400">{totalOdds.toFixed(2)}</span>
       </div>
 
-      {/* Stake Input */}
+      {/* Stake Input (KES) */}
       <div className="mb-3">
-        <input
-          type="number"
-          min="1"
-          placeholder="Enter stake"
-          value={stake || ''}
-          onChange={(e) => setStake(Number(e.target.value))}
-          className="input-field text-center text-lg font-bold"
-        />
+        <div className="relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium text-sm">KES</span>
+          <input
+            type="number"
+            min="50"
+            max="500000"
+            placeholder="Min 50"
+            value={stake || ''}
+            onChange={(e) => setStake(Number(e.target.value))}
+            className="input-field pl-12 text-center text-lg font-bold"
+            inputMode="numeric"
+          />
+        </div>
+        {/* Quick stake buttons */}
+        <div className="grid grid-cols-4 gap-1 mt-2">
+          {[50, 100, 500, 1000].map((amt) => (
+            <button
+              key={amt}
+              onClick={() => setStake(amt)}
+              className="text-xs bg-dark-100 hover:bg-dark-200 border border-gray-700 rounded py-1.5 font-medium"
+            >
+              {amt}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Potential Win */}
       <div className="flex justify-between text-sm mb-4 px-1">
         <span className="text-gray-400">Potential Win</span>
-        <span className="font-bold text-accent-yellow text-lg">
-          KES {potentialWin.toFixed(2)}
-        </span>
+        <span className="font-bold text-accent-yellow text-lg">{formatKES(potentialWin)}</span>
       </div>
 
       {/* Message */}
       {message && (
-        <div
-          className={`text-sm text-center mb-3 px-3 py-2 rounded ${
-            message.type === 'success'
-              ? 'bg-green-500/20 text-green-400'
-              : 'bg-red-500/20 text-red-400'
-          }`}
-        >
+        <div className={`text-sm text-center mb-3 px-3 py-2 rounded ${
+          message.type === 'success' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+        }`}>
           {message.text}
         </div>
       )}
 
-      {/* Place Bet Button */}
+      {/* Place Bet */}
       <button
         onClick={onPlace}
-        disabled={isPlacing || selections.length === 0}
+        disabled={isPlacing || selections.length === 0 || stake < 50}
         className="w-full btn-primary py-3 text-lg disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {isPlacing ? 'Placing...' : 'Place Bet'}
+        {isPlacing ? 'Placing...' : `Place Bet — ${formatKES(stake || 0)}`}
       </button>
     </div>
   );

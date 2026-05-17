@@ -2,6 +2,10 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 
+function formatKES(amount: number): string {
+  return `KES ${amount.toLocaleString('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
 interface DashboardStats {
   total_users: number;
   active_tickets: number;
@@ -66,8 +70,8 @@ function DashboardTab() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard label="Users" value={stats?.total_users || 0} />
         <StatCard label="Active Bets" value={stats?.active_tickets || 0} />
-        <StatCard label="Total Stakes" value={`KES ${(stats?.total_stakes_today || 0).toFixed(0)}`} />
-        <StatCard label="Liability" value={`KES ${(stats?.total_liability || 0).toFixed(0)}`} color="red" />
+        <StatCard label="Total Stakes" value={formatKES(stats?.total_stakes_today || 0)} />
+        <StatCard label="Liability" value={formatKES(stats?.total_liability || 0)} color="red" />
       </div>
 
       {/* Liability Table */}
@@ -87,10 +91,10 @@ function DashboardTab() {
               </div>
               <div className="text-right">
                 <p className="text-sm font-bold text-red-400">
-                  KES {l.total_potential_payout.toFixed(2)}
+                  {formatKES(l.total_potential_payout)}
                 </p>
                 <p className="text-xs text-gray-500">
-                  Stakes: KES {l.total_stakes.toFixed(2)}
+                  Stakes: {formatKES(l.total_stakes)}
                 </p>
               </div>
             </div>

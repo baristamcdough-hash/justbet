@@ -38,6 +38,9 @@ class Wallet(Base):
     bonus_balance: Mapped[Decimal] = mapped_column(
         Numeric(12, 2), default=Decimal("0.00"), nullable=False
     )
+    currency: Mapped[str] = mapped_column(
+        String(3), default="KES", nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
@@ -62,6 +65,9 @@ class Transaction(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     balance_after: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     reference_id: Mapped[str] = mapped_column(String(36), nullable=True, index=True)
+    checkout_request_id: Mapped[str] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     status: Mapped[TransactionStatus] = mapped_column(
         SAEnum(TransactionStatus), default=TransactionStatus.PENDING, nullable=False
     )
