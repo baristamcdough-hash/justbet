@@ -7,17 +7,33 @@
 # Docs: https://render.com/docs/blueprint-spec
 # ============================================================================
 
+envVarGroups:
+  # Shared secrets and config across all services
+  - name: justbet-shared
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: FIRST_ADMIN_PHONE
+        sync: false
+      - key: FIRST_ADMIN_PIN
+        sync: false
+      - key: ADMIN_SECRET_TOKEN
+        generateValue: true
+      - key: DEFAULT_CURRENCY
+        value: KES
+
 databases:
   # --------------------------------------------------------------------------
   # PostgreSQL — Primary data store (users, wallets, tickets, matches)
   # --------------------------------------------------------------------------
   - name: justbet-db
-    plan: basic
+    plan: starter
     databaseName: justbet
     user: justbet
-    region: oregon
     postgresMajorVersion: "16"
-    ipAllowList: []  # Only internal services can connect
+    ipAllowList: []
 
 services:
   # --------------------------------------------------------------------------
@@ -27,7 +43,6 @@ services:
     name: justbet-frontend
     runtime: static
     plan: starter
-    region: oregon
     repo: https://github.com/baristamcdough-hash/justbet
     rootDir: frontend
     buildCommand: npm install && npm run build
@@ -48,15 +63,9 @@ services:
         destination: /index.html
     envVars:
       - key: VITE_API_URL
-        fromService:
-          name: justbet-api
-          type: web
-          property: url
+        value: https://justbet-api.onrender.com
       - key: VITE_WS_URL
-        fromService:
-          name: justbet-api
-          type: web
-          envVarKey: RENDER_WS_URL
+        value: wss://justbet-api.onrender.com/ws/odds
       - key: NODE_VERSION
         value: "20"
 
@@ -80,38 +89,19 @@ services:
         fromDatabase:
           name: justbet-db
           property: connectionString
-      - key: DATABASE_URL_INTERNAL
-        fromDatabase:
-          name: justbet-db
-          property: internalConnectionString
       # ── Redis ──
       - key: REDIS_URL
         fromService:
           name: justbet-redis
           type: redis
           property: connectionString
-      - key: REDIS_INTERNAL_URL
-        fromService:
-          name: justbet-redis
-          type: redis
-          property: internalConnectionString
-      # ── JWT & Security ──
-      - key: JWT_SECRET
-        generateValue: true
-      - key: JWT_ALGORITHM
-        value: HS256
+      # ── Shared secrets (from env group) ──
+      - fromGroup: justbet-shared
+      # ── Application ──
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "30"
       - key: REFRESH_TOKEN_EXPIRE_DAYS
         value: "30"
-      # ── Admin Seeding (First Boot) ──
-      - key: FIRST_ADMIN_PHONE
-        sync: false  # Set manually in Render dashboard
-      - key: FIRST_ADMIN_PIN
-        sync: false  # Set manually in Render dashboard
-      - key: ADMIN_SECRET_TOKEN
-        generateValue: true
-      # ── Application ──
       - key: APP_NAME
         value: JustBet
       - key: APP_ENV
@@ -122,21 +112,13 @@ services:
         value: "3.12.3"
       # ── CORS ──
       - key: CORS_ORIGINS
-        fromService:
-          name: justbet-frontend
-          type: web
-          property: url
-      # ── WebSocket Public URL ──
-      - key: RENDER_WS_URL
-        value: wss://justbet-api.onrender.com/ws/odds
+        value: https://justbet-frontend.onrender.com
       # ── Rate Limiting ──
       - key: RATE_LIMIT_AUTH
         value: "100"
       - key: RATE_LIMIT_ANON
         value: "30"
       # ── Kenya Locale ──
-      - key: DEFAULT_CURRENCY
-        value: KES
       - key: MIN_STAKE
         value: "50"
       - key: MAX_STAKE
@@ -164,36 +146,19 @@ services:
     startCommand: python -m app.worker
     autoDeploy: true
     envVars:
-      # ── Database (internal networking) ──
+      # ── Database ──
       - key: DATABASE_URL
         fromDatabase:
           name: justbet-db
-          property: internalConnectionString
-      # ── Redis (internal networking) ──
+          property: connectionString
+      # ── Redis ──
       - key: REDIS_URL
         fromService:
           name: justbet-redis
           type: redis
-          property: internalConnectionString
-      # ── Shared secrets ──
-      - key: JWT_SECRET
-        fromService:
-          name: justbet-api
-          type: web
-          envVarKey: JWT_SECRET
-      - key: JWT_ALGORITHM
-        value: HS256
-      # ── Admin Seeding (shared with API for first-boot logic) ──
-      - key: FIRST_ADMIN_PHONE
-        fromService:
-          name: justbet-api
-          type: web
-          envVarKey: FIRST_ADMIN_PHONE
-      - key: FIRST_ADMIN_PIN
-        fromService:
-          name: justbet-api
-          type: web
-          envVarKey: FIRST_ADMIN_PIN
+          property: connectionString
+      # ── Shared secrets (from env group) ──
+      - fromGroup: justbet-shared
       # ── Application ──
       - key: APP_NAME
         value: JustBet
@@ -208,15 +173,13 @@ services:
         value: "5"
       - key: WORKER_MAX_RETRIES
         value: "3"
-      - key: DEFAULT_CURRENCY
-        value: KES
 
-# --------------------------------------------------------------------------
-# 4. REDIS — Pub/Sub broker + live odds cache (Render Key Value Store)
-# --------------------------------------------------------------------------
+  # --------------------------------------------------------------------------
+  # 4. REDIS — Pub/Sub broker + live odds cache
+  # --------------------------------------------------------------------------
   - type: redis
     name: justbet-redis
     plan: starter
     region: oregon
     maxmemoryPolicy: allkeys-lru
-    ipAllowList: []  # Only internal services connect
+    ipAllowList: []
