@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-dark-500 text-white min-h-screen font-sans antialiased;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary-600 hover:bg-primary-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors duration-200;
+  }
+
+  .btn-secondary {
+    @apply bg-dark-100 hover:bg-dark-200 text-white font-medium py-2 px-4 rounded-lg border border-gray-600 transition-colors duration-200;
+  }
+
+  .card {
+    @apply bg-dark-300 rounded-lg border border-gray-700/50;
+  }
+
+  .odds-cell {
+    @apply min-w-[60px] min-h-[44px] flex items-center justify-center rounded-md font-bold text-sm cursor-pointer transition-all duration-200 select-none;
+  }
+
+  .odds-cell-default {
+    @apply bg-dark-100 text-gray-200 hover:bg-dark-200 border border-gray-600;
+  }
+
+  .odds-cell-selected {
+    @apply bg-primary-600 text-white border border-primary-500 shadow-lg;
+  }
+
+  .input-field {
+    @apply w-full bg-dark-100 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500;
+  }
+}
