@@ -212,10 +212,10 @@ services:
         value: KES
 
 # --------------------------------------------------------------------------
-# 4. REDIS KEY-VALUE STORE — Pub/Sub broker + live odds cache
+# 4. REDIS — Pub/Sub broker + live odds cache (Render Key Value Store)
 # --------------------------------------------------------------------------
-keyValueStores:
-  - name: justbet-redis
+  - type: redis
+    name: justbet-redis
     plan: starter
     region: oregon
     maxmemoryPolicy: allkeys-lru
